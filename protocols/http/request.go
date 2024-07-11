@@ -9,6 +9,7 @@ import (
 	"github.com/chainreactors/neutron/protocols"
 	"github.com/projectdiscovery/interactsh/pkg/client"
 	"github.com/projectdiscovery/interactsh/pkg/server"
+	"github.com/projectdiscovery/rawhttp"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -365,6 +366,7 @@ func (r *Request) ExecuteWithResults(input *protocols.ScanContext, dynamicValues
 
 func (r *Request) ExecuteRequestWithResults(input *protocols.ScanContext, dynamicValues, previous map[string]interface{}, callback protocols.OutputEventCallback) error {
 	variablesMap := r.options.Variables.Evaluate(common.MergeMaps(dynamicValues, previous))
+	r.options.Variables = protocols.Variable{}
 	dynamicValues = common.MergeMaps(variablesMap, dynamicValues)
 	generator := r.newGenerator(input.Payloads)
 	requestCount := 1
@@ -380,9 +382,17 @@ func (r *Request) ExecuteRequestWithResults(input *protocols.ScanContext, dynami
 				}
 				return true, err
 			}
-			if generatedHttpRequest.request.Header.Get("User-Agent") == "" {
-				generatedHttpRequest.request.Header.Set("User-Agent", ua)
+			if generatedHttpRequest.request != nil {
+				if generatedHttpRequest.request.Header.Get("User-Agent") == "" {
+					generatedHttpRequest.request.Header.Set("User-Agent", ua)
+				}
 			}
+			if generatedHttpRequest.rawhttpClient != nil {
+				if generatedHttpRequest.rawhttpClient.Headers["User-Agent"] == "" {
+					generatedHttpRequest.rawhttpClient.Headers["User-Agent"] = ua
+				}
+			}
+
 			var gotMatches bool
 			err = r.executeRequest(input, generatedHttpRequest, previous, func(event *protocols.InternalWrappedEvent) {
 				// Add the extracts to the dynamic values if any.
@@ -442,16 +452,39 @@ func (r *Request) ExecuteRequestWithResults(input *protocols.ScanContext, dynami
 
 func (r *Request) executeRequest(input *protocols.ScanContext, request *generatedRequest, previousEvent map[string]interface{}, callback protocols.OutputEventCallback, reqcount int, cl *client.Client, u string) error {
 	timeStart := time.Now()
-	resp, err := r.httpClient.Do(request.request)
-	common.NeutronLog.Debugf("request %s %v %v", request.request.Method, request.request.URL, request.dynamicValues)
+	var resp *http.Response
+	var err error
+	var method string
+	var uuu string
+	var h = make(map[string]string)
+	if request.request != nil {
+		resp, err = r.httpClient.Do(request.request)
+		method = request.request.Method
+		uuu = request.request.URL.String()
+		for k, v := range request.request.Header {
+			h[k] = v[0]
+		}
+	} else if request.rawhttpClient != nil {
+		h = request.rawhttpClient.Headers
+		hh := make(map[string][]string)
+		for k, v := range request.rawhttpClient.Headers {
+			hh[k] = []string{v}
+		}
+		resp, err = request.rawhttpClient.Client.DoRaw(request.rawhttpClient.Method, request.rawhttpClient.Url, request.rawhttpClient.UriPath, hh, request.rawhttpClient.Body)
+		method = request.rawhttpClient.Method
+	}
+
+	common.NeutronLog.Debugf("request %s %s %v", method, uuu, request.dynamicValues)
 	if err != nil {
-		common.NeutronLog.Debugf("%s nuclei request failed, %s", request.request.URL, err.Error())
+		common.NeutronLog.Debugf("%s nuclei request failed, %s", uuu, err.Error())
 		return err
 	}
 	duration := time.Since(timeStart)
 	matchedURL := input.Input
 	if request.request != nil {
-		matchedURL = request.request.URL.String()
+		matchedURL = uuu
+	} else if request.rawhttpClient != nil {
+		matchedURL = uuu
 	}
 	// Give precedence to the final URL from response
 	if resp.Request != nil {
@@ -460,7 +493,7 @@ func (r *Request) executeRequest(input *protocols.ScanContext, request *generate
 		}
 	}
 	finalEvent := make(map[string]interface{})
-	outputEvent := r.responseToDSLMap(request.request, resp, input.Input, matchedURL, duration, request.dynamicValues)
+	outputEvent := r.responseToDSLMap(method, h, uuu, resp, input.Input, matchedURL, duration, request.dynamicValues)
 	for k, v := range previousEvent {
 		finalEvent[k] = v
 	}
@@ -491,7 +524,7 @@ func (r *Request) executeRequest(input *protocols.ScanContext, request *generate
 }
 
 // responseToDSLMap converts an HTTP response to a map for use in DSL matching
-func (r *Request) responseToDSLMap(req *http.Request, resp *http.Response, host, matched string, duration time.Duration, extra map[string]interface{}) protocols.InternalEvent {
+func (r *Request) responseToDSLMap(method string, headers map[string]string, uuu string, resp *http.Response, host, matched string, duration time.Duration, extra map[string]interface{}) protocols.InternalEvent {
 	data := make(protocols.InternalEvent, 12+len(extra)+len(resp.Header)+len(resp.Cookies()))
 	for k, v := range extra {
 		data[k] = v
@@ -525,8 +558,8 @@ func (r *Request) responseToDSLMap(req *http.Request, resp *http.Response, host,
 	data["response"] = respRaw.String()
 
 	var reqRaw bytes.Buffer
-	reqRaw.WriteString(fmt.Sprintf("%s %s\r\n", req.Method, req.URL.String()))
-	for k, v := range req.Header {
+	reqRaw.WriteString(fmt.Sprintf("%s %s\r\n", method, uuu))
+	for k, v := range headers {
 		reqRaw.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
 	}
 	respRaw.WriteString("\r\n")
@@ -558,6 +591,15 @@ func checkRequestConditionExpressions(expressions ...string) bool {
 	return false
 }
 
+type RawHttpClient struct {
+	Client  *rawhttp.Client
+	Method  string
+	Url     string
+	UriPath string
+	Headers map[string]string
+	Body    io.Reader
+}
+
 // generatedRequest is a single wrapped generated request for a template request
 type generatedRequest struct {
 	original *Request
@@ -565,5 +607,6 @@ type generatedRequest struct {
 	meta map[string]interface{}
 	//pipelinedClient *rawhttp.PipelineClient
 	request       *http.Request
+	rawhttpClient *RawHttpClient
 	dynamicValues map[string]interface{}
 }

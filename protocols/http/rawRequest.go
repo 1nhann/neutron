@@ -3,6 +3,7 @@ package http
 import (
 	"bufio"
 	"fmt"
+	"github.com/projectdiscovery/rawhttp"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -131,10 +132,6 @@ func parseRaw(request, baseURL string, unsafe bool) (*rawRequest, error) {
 }
 
 func (raw rawRequest) makeRequest() *http.Request {
-	//var body io.ReadCloser
-	//
-	//body = ioutil.NopCloser(strings.NewReader(raw.Data))
-
 	req, err := http.NewRequest(raw.Method, raw.FullURL, strings.NewReader(raw.Data))
 	if err != nil {
 		return nil
@@ -149,7 +146,15 @@ func (raw rawRequest) makeRequest() *http.Request {
 		}
 	}
 	return req
-
+}
+func (raw rawRequest) makeRawRequest() *RawHttpClient {
+	return &RawHttpClient{
+		Client:  rawhttp.NewClient(rawhttp.DefaultOptions),
+		Method:  raw.Method,
+		Url:     raw.FullURL,
+		Headers: raw.Headers,
+		Body:    strings.NewReader(raw.Data),
+	}
 }
 
 func parse(method, path, body, baseURL string, headers map[string]string, unsafe bool) (*rawRequest, error) {

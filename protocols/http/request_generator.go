@@ -176,7 +176,6 @@ func (r *requestGenerator) Make(baseURL, data string, payloads, dynamicValues ma
 
 		URL := r.InteractshClient.URL()
 		r.InteractshFullid = URL
-
 		data = strings.ReplaceAll(data, "{{interactsh-url}}", URL)
 	}
 	if err != nil {
@@ -206,6 +205,9 @@ func baseURLWithTemplatePrefs(data string, parsed *url.URL) (string, *url.URL) {
 	return data, parsed
 }
 
+//func (r *Request) executeRequest(reqURL string, request *generatedRequest, previous output.InternalEvent, requestCount int) error {
+//}
+
 // MakeHTTPRequestFromModel creates a *http.Request from a request template
 func (r *requestGenerator) makeHTTPRequestFromModel(data string, values, dynamicValues map[string]interface{}) (*generatedRequest, error) {
 	// Build a request on the specified URL
@@ -233,7 +235,11 @@ func (r *requestGenerator) makeHTTPRequestFromRaw(baseURL, data string, values, 
 	// Unsafe option uses rawhttp library
 	if r.request.Unsafe {
 		request = rawRequestData.makeRequest()
-		unsafeReq := &generatedRequest{request: request, meta: values, dynamicValues: dynamicValues, original: r.request}
+		var rawrequest *RawHttpClient
+		if request == nil {
+			rawrequest = rawRequestData.makeRawRequest()
+		}
+		unsafeReq := &generatedRequest{request: request, meta: values, dynamicValues: dynamicValues, original: r.request, rawhttpClient: rawrequest}
 		return unsafeReq, nil
 	}
 
