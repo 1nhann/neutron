@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"github.com/chainreactors/neutron/operators"
+	"github.com/projectdiscovery/interactsh/pkg/client"
 	"time"
 )
 
@@ -39,7 +40,7 @@ type Request interface {
 	// be evaluated from the third request by using the IDs for both requests.
 	//GetID() string
 	// Match performs matching operation for a matcher on model and returns true or false.
-	Match(data map[string]interface{}, matcher *operators.Matcher) (bool, []string)
+	Match(data map[string]interface{}, matcher *operators.Matcher, cl *client.Client, u string) (bool, []string)
 	// Extract performs extracting operation for a extractor on model and returns true or false.
 	Extract(data map[string]interface{}, matcher *operators.Extractor) map[string]struct{}
 	// ExecuteWithResults executes the protocol requests and returns results instead of writing them.

@@ -6,6 +6,7 @@ import (
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/operators"
 	protocols "github.com/chainreactors/neutron/protocols"
+	"github.com/projectdiscovery/interactsh/pkg/client"
 	"io"
 	"net"
 	"net/url"
@@ -34,9 +35,12 @@ func (r *Request) getMatchPart(part string, data protocols.InternalEvent) (strin
 
 	return itemStr, true
 }
+func (r *Request) Match(data map[string]interface{}, matcher *operators.Matcher, cl *client.Client, u string) (bool, []string) {
+	return r.Match0(data, matcher)
+}
 
 // Match matches a generic data response again a given matcher
-func (r *Request) Match(data map[string]interface{}, matcher *operators.Matcher) (bool, []string) {
+func (r *Request) Match0(data map[string]interface{}, matcher *operators.Matcher) (bool, []string) {
 	itemStr, ok := r.getMatchPart(matcher.Part, data)
 	if !ok {
 		return ok, []string{}
@@ -276,7 +280,7 @@ func (r *Request) executeRequestWithPayloads(variables map[string]interface{}, a
 	//}
 	event := &protocols.InternalWrappedEvent{InternalEvent: dynamicValues}
 	if r.CompiledOperators != nil {
-		result, ok := r.CompiledOperators.Execute(map[string]interface{}{"data": responseBuilder.String()}, r.Match, r.Extract)
+		result, ok := r.CompiledOperators.Execute(map[string]interface{}{"data": responseBuilder.String()}, r.Match, r.Extract, nil, "")
 		if ok && result != nil {
 			event.OperatorsResult = result
 			event.OperatorsResult.PayloadValues = payloads

@@ -3,6 +3,7 @@ package operators
 import (
 	"fmt"
 	"github.com/chainreactors/neutron/common"
+	"github.com/projectdiscovery/interactsh/pkg/client"
 	"strconv"
 )
 
@@ -67,11 +68,11 @@ func (r *Operators) GetMatchersCondition() ConditionType {
 	return r.matchersCondition
 }
 
-type matchFunc func(data map[string]interface{}, matcher *Matcher) (bool, []string)
+type matchFunc func(data map[string]interface{}, matcher *Matcher, cli *client.Client, u string) (bool, []string)
 type extractFunc func(data map[string]interface{}, matcher *Extractor) map[string]struct{}
 
 // Execute executes the operators on data and returns a result structure
-func (operators *Operators) Execute(data map[string]interface{}, match matchFunc, extract extractFunc) (*Result, bool) {
+func (operators *Operators) Execute(data map[string]interface{}, match matchFunc, extract extractFunc, cli *client.Client, u string) (*Result, bool) {
 	matcherCondition := operators.GetMatchersCondition()
 
 	var matches bool
@@ -134,7 +135,7 @@ func (operators *Operators) Execute(data map[string]interface{}, match matchFunc
 	}
 
 	for _, matcher := range operators.Matchers {
-		if isMatch, matched := match(data, matcher); isMatch {
+		if isMatch, matched := match(data, matcher, cli, u); isMatch {
 			if matcherCondition == ORCondition && matcher.Name != "" {
 				result.Matches[matcher.Name] = matched
 			}

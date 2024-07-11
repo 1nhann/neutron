@@ -2,12 +2,13 @@ package templates
 
 import (
 	"fmt"
+	"os"
+	"testing"
+
 	"github.com/chainreactors/logs"
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/protocols"
 	"gopkg.in/yaml.v3"
-	"os"
-	"testing"
 )
 
 var ExecuterOptions *protocols.ExecuterOptions

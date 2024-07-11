@@ -2,14 +2,18 @@ package http
 
 import (
 	"fmt"
-	"github.com/chainreactors/neutron/common"
-	"github.com/chainreactors/neutron/protocols"
-	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/chainreactors/neutron/common"
+	"github.com/chainreactors/neutron/protocols"
+	"github.com/projectdiscovery/interactsh/pkg/client"
+	"github.com/projectdiscovery/interactsh/pkg/settings"
+	"github.com/projectdiscovery/retryablehttp-go"
 )
 
 type requestGenerator struct {
@@ -19,6 +23,8 @@ type requestGenerator struct {
 	request          *Request
 	payloadIterator  *protocols.Iterator
 	rawRequest       *rawRequest
+	InteractshClient *client.Client
+	InteractshFullid string
 }
 
 // newGenerator creates a NewGenerator request generator instance
@@ -118,6 +124,9 @@ func (r *requestGenerator) Total() int {
 	return len(r.request.Path)
 }
 
+var InteractshServer string
+var InteractshKey string
+
 // Make creates a http request for the provided input.
 // It returns io.EOF as error when all the requests have been exhausted.
 func (r *requestGenerator) Make(baseURL, data string, payloads, dynamicValues map[string]interface{}) (*generatedRequest, error) {
@@ -146,6 +155,30 @@ func (r *requestGenerator) Make(baseURL, data string, payloads, dynamicValues ma
 	values := common.MergeMaps(allVars, generateVariables(parsed, trailingSlash))
 
 	data, err = common.Evaluate(data, values)
+	if strings.Contains(data, "{{interactsh-url}}") {
+		if InteractshServer != "" && InteractshKey != "" {
+			r.InteractshClient, err = client.New(&client.Options{
+				//ServerURL: "oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me",
+				ServerURL:                InteractshServer,
+				Token:                    InteractshKey,
+				HTTPClient:               retryablehttp.NewClient(retryablehttp.DefaultOptionsSingle),
+				CorrelationIdLength:      settings.CorrelationIdLengthDefault,
+				CorrelationIdNonceLength: settings.CorrelationIdNonceLengthDefault,
+			})
+		} else {
+			r.InteractshClient, err = client.New(&client.Options{
+				ServerURL:                "oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me",
+				HTTPClient:               retryablehttp.NewClient(retryablehttp.DefaultOptionsSingle),
+				CorrelationIdLength:      settings.CorrelationIdLengthDefault,
+				CorrelationIdNonceLength: settings.CorrelationIdNonceLengthDefault,
+			})
+		}
+
+		URL := r.InteractshClient.URL()
+		r.InteractshFullid = URL
+
+		data = strings.ReplaceAll(data, "{{interactsh-url}}", URL)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -172,9 +205,6 @@ func baseURLWithTemplatePrefs(data string, parsed *url.URL) (string, *url.URL) {
 	}
 	return data, parsed
 }
-
-//func (r *Request) executeRequest(reqURL string, request *generatedRequest, previous output.InternalEvent, requestCount int) error {
-//}
 
 // MakeHTTPRequestFromModel creates a *http.Request from a request template
 func (r *requestGenerator) makeHTTPRequestFromModel(data string, values, dynamicValues map[string]interface{}) (*generatedRequest, error) {
@@ -234,10 +264,17 @@ func (r *requestGenerator) makeHTTPRequestFromRaw(baseURL, data string, values, 
 // fillRequest fills various headers in the request with values
 func (r *requestGenerator) fillRequest(req *http.Request, values map[string]interface{}) (*http.Request, error) {
 	// Set the header values requested
+	var err error
+	for i, value := range r.request.Path {
+		r.request.Path[i], err = common.Evaluate(value, values)
+		if err != nil {
+			return nil, common.EvalError
+		}
+	}
 	for header, value := range r.request.Headers {
 		value, err := common.Evaluate(value, values)
 		if err != nil {
-			return nil, err
+			return nil, common.EvalError
 		}
 		req.Header[header] = []string{value}
 		if header == "Host" {
@@ -246,29 +283,24 @@ func (r *requestGenerator) fillRequest(req *http.Request, values map[string]inte
 	}
 
 	// In case of multiple threads the underlying connection should remain open to allow reuse
-	if r.request.Threads <= 0 && req.Header.Get("Connection") == "" {
-		req.Close = true
-	}
+	//if r.request.Threads <= 0 && req.header.Get("Connection") == "" {
+	//	req.Close = true
+	//}
 
 	// Check if the user requested a request body
 	if r.request.Body != "" {
-		body := r.request.Body
-		body, err := common.Evaluate(body, values)
+		body, err := common.Evaluate(r.request.Body, values)
 		if err != nil {
-			return nil, err
+			return nil, common.EvalError
 		}
-		req.Body = io.NopCloser(strings.NewReader(body))
+		req.Body = ioutil.NopCloser(strings.NewReader(body))
 	}
-	//if !r.request.Unsafe {
-	//	setHeader(req, "User-Agent", common.GetRandom())
-	//}
 
-	// Only set these headers on non-raw requests
-	if len(r.request.Raw) == 0 && !r.request.Unsafe {
+	// Only set these headers on non raw requests
+	if len(r.request.Raw) == 0 {
 		setHeader(req, "Accept", "*/*")
 		setHeader(req, "Accept-Language", "en")
 	}
-
 	return req, nil
 }
 

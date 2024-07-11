@@ -7,6 +7,8 @@ import (
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/operators"
 	"github.com/chainreactors/neutron/protocols"
+	"github.com/projectdiscovery/interactsh/pkg/client"
+	"github.com/projectdiscovery/interactsh/pkg/server"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -16,7 +18,8 @@ import (
 )
 
 var errStopExecution = errors.New("stop execution due to unresolved variables")
-var _ protocols.Request = &Request{}
+
+//var _ protocols.Request = &Request{}
 
 type Request struct {
 	// operators for the current request go here.
@@ -101,9 +104,44 @@ func (request *Request) NeedsRequestCondition() bool {
 }
 
 // Match matches a generic data response again a given matcher
-func (r *Request) Match(data map[string]interface{}, matcher *operators.Matcher) (bool, []string) {
+func (r *Request) Match(data map[string]interface{}, matcher *operators.Matcher, cl *client.Client, u string) (bool, []string) {
 	item, ok := r.getMatchPart(matcher.Part, data)
 	if !ok {
+		if matcher.Part == "interactsh_protocol" && matcher.GetType() == operators.WordsMatcher {
+			//var protocal string
+			//var fullid string
+			//match := func(matcher0 *operators.Matcher, uu string) bool {
+			//	var m bool
+			//	err := cl.StartPolling(time.Duration(1*time.Second), func(interaction *server.Interaction) {
+			//		if interaction.Protocol == matcher0.Words[0] && interaction.FullId == strings.Split(uu, ".")[0] {
+			//			m = true
+			//		}
+			//		//fmt.Printf("eeeeGot Interaction: %v => %v\n", interaction.Protocol, interaction.FullId)
+			//	})
+			//	if err != nil {
+			//		fmt.Sprintf(err.Error())
+			//	}
+			//	//defer cl.StopPolling()
+			//	time.Sleep(1 * time.Second)
+			//	return m
+			//}(matcher, u)
+			var match bool
+			err := cl.StartPolling(time.Duration(1*time.Second), func(interaction *server.Interaction) {
+				if interaction.Protocol == matcher.Words[0] && interaction.FullId == strings.Split(u, ".")[0] {
+					match = true
+				}
+				//fmt.Printf("eeeeGot Interaction: %v => %v\n", interaction.Protocol, interaction.FullId)
+			})
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			defer cl.StopPolling()
+			time.Sleep(1 * time.Second)
+
+			if match {
+				return true, []string{}
+			}
+		}
 		return false, []string{}
 	}
 
@@ -353,7 +391,7 @@ func (r *Request) ExecuteRequestWithResults(input *protocols.ScanContext, dynami
 					gotDynamicValues = common.MergeMapsMany(event.OperatorsResult.DynamicValues, gotDynamicValues)
 				}
 				callback(event)
-			}, generator.currentIndex)
+			}, generator.currentIndex, generator.InteractshClient, generator.InteractshFullid)
 
 			// If a variable is unresolved, skip all further requests
 			if err == errStopExecution {
@@ -402,7 +440,7 @@ func (r *Request) ExecuteRequestWithResults(input *protocols.ScanContext, dynami
 	return requestErr
 }
 
-func (r *Request) executeRequest(input *protocols.ScanContext, request *generatedRequest, previousEvent map[string]interface{}, callback protocols.OutputEventCallback, reqcount int) error {
+func (r *Request) executeRequest(input *protocols.ScanContext, request *generatedRequest, previousEvent map[string]interface{}, callback protocols.OutputEventCallback, reqcount int, cl *client.Client, u string) error {
 	timeStart := time.Now()
 	resp, err := r.httpClient.Do(request.request)
 	common.NeutronLog.Debugf("request %s %v %v", request.request.Method, request.request.URL, request.dynamicValues)
@@ -441,7 +479,7 @@ func (r *Request) executeRequest(input *protocols.ScanContext, request *generate
 	event := &protocols.InternalWrappedEvent{InternalEvent: outputEvent}
 	if r.CompiledOperators != nil {
 		var ok bool
-		event.OperatorsResult, ok = r.CompiledOperators.Execute(finalEvent, r.Match, r.Extract)
+		event.OperatorsResult, ok = r.CompiledOperators.Execute(finalEvent, r.Match, r.Extract, cl, u)
 		if ok && event.OperatorsResult != nil {
 			event.OperatorsResult.PayloadValues = request.dynamicValues
 			event.Results = r.MakeResultEvent(event)
